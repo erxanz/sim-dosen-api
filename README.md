@@ -160,6 +160,8 @@ Server berjalan di `http://localhost:<PORT>/api` (default `http://localhost:3000
 | Method | Endpoint | Keterangan |
 | --- | --- | --- |
 | GET | `/api/health` | Health check + koneksi database (**publik**, tanpa token) |
+| POST | `/api/auth/login` | Login akun (`admin`, `baak`, `dosen`, `mahasiswa`) & terbitkan JWT SSO (**publik**) |
+| GET | `/api/auth/me` | Info pengguna dari token yang aktif (perlu token) |
 | GET | `/api/dosen` | Ambil semua data dosen (perlu token SSO) |
 | GET | `/api/dosen/:id` | Ambil satu data dosen (perlu token SSO) |
 | POST | `/api/dosen` | Tambah data dosen — `ADMIN`, `BAAK` (hanya `nama` wajib) |

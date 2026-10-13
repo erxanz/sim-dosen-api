@@ -2,6 +2,7 @@ import { Router } from "express";
 import prisma from "../config/database.js";
 import { ok } from "../utils/json.js";
 import dosenRoutes from "./dosen.routes.js";
+import authRoutes from "./auth.routes.js";
 
 const router = Router();
 
@@ -18,6 +19,8 @@ router.get("/health", async (_req, res, next) => {
   }
 });
 
+router.use("/auth", authRoutes);
 router.use("/dosen", dosenRoutes);
 
 export default router;
+

@@ -20,3 +20,25 @@ if (!process.env.JWT_SECRET) {
 export function verifyAccessToken(token) {
   return jwt.verify(token, process.env.JWT_SECRET, { issuer: SSO_ISSUER });
 }
+
+/**
+ * Buat access token JWT yang valid untuk autentikasi backend.
+ */
+export function generateAccessToken(user, expiresIn = "2h") {
+  return jwt.sign(
+    {
+      sub: String(user.id),
+      username: user.username,
+      nama: user.nama,
+      role: user.role,
+      scope: user.scope || { idUniversitas: 1 },
+      typ: "access",
+    },
+    process.env.JWT_SECRET,
+    {
+      issuer: SSO_ISSUER,
+      expiresIn,
+    }
+  );
+}
+
