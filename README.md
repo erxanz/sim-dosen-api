@@ -5,6 +5,7 @@ REST API untuk Sistem Informasi Manajemen Dosen. Dibangun dengan **Node.js**, **
 ## Daftar Isi
 
 - [Fitur](#fitur)
+- [Autentikasi SSO dengan sim-mhs-api](#autentikasi-sso-dengan-sim-mhs-api)
 - [Prasyarat](#prasyarat)
 - [Setup Database Neon](#setup-database-neon)
 - [Konfigurasi Environment](#konfigurasi-environment)
@@ -20,6 +21,7 @@ REST API untuk Sistem Informasi Manajemen Dosen. Dibangun dengan **Node.js**, **
 ## Fitur
 
 - CRUD lengkap untuk data dosen (`GET`, `POST`, `PUT`, `DELETE`)
+- Autentikasi **SSO** memakai JWT yang diterbitkan `sim-mhs-api`
 - Health check `GET /api/health` yang benar-benar mengecek koneksi database
 - Validasi input (field wajib, panjang maksimal sesuai kolom, field tidak dikenal)
 - Respons JSON yang konsisten: `{ success, message, data }`
@@ -44,6 +46,39 @@ REST API untuk Sistem Informasi Manajemen Dosen. Dibangun dengan **Node.js**, **
 
 Skema SQL referensi tersimpan di `sim_dosen.sql` (kolom tabel `dosen` yang menjadi acuan `prisma/schema.prisma`).
 
+## Autentikasi SSO dengan sim-mhs-api
+
+API ini **tidak memiliki login sendiri**. Login dilakukan di [`sim-mhs-api`](../sim-mhs-api) (`POST /api/auth/login`), yang menerbitkan access token JWT (HS256, issuer `sim-mhs-api`, masa berlaku 15 menit). `sim-dosen-api` memverifikasi token yang sama secara **stateless**:
+
+1. `JWT_SECRET` di `.env` project ini **harus sama persis** dengan `JWT_SECRET` di `.env` `sim-mhs-api`.
+2. Setiap request (kecuali `/api/health`) wajib menyertakan header:
+   ```http
+   Authorization: Bearer <access token dari sim-mhs-api>
+   ```
+3. Payload token yang dipakai: `sub` (id pengguna), `username`, `nama`, `role` (kodeRole), dan `scope` (`idUniversitas`, `idFakultas`, `idProgramStudi`).
+4. Token kedaluwarsa / salah issuer / bukan access token → `401`. Lakukan `POST /api/auth/refresh` di `sim-mhs-api` bila perlu.
+
+### Kebijakan akses per role
+
+| Aksi | Role yang diizinkan |
+| --- | --- |
+| `GET /api/dosen`, `GET /api/dosen/:id` | Semua role yang login (`ADMIN`, `BAAK`, `DOSEN`, `MAHASISWA`, `REKTORAT`, `DEKANAT`, `KAPRODI`, `ADMIN_PRODI`, `ADMIN_DEKANAT`) |
+| `POST`, `PUT`, `DELETE` | `ADMIN`, `BAAK` saja |
+
+Implementasi ada di `src/config/jwt.js` (verifikasi) dan `src/middleware/auth.js` (`authenticate` + `authorize`, mengikuti pola yang sama dengan `sim-mhs-api`).
+
+### Contoh alur
+
+```bash
+# 1. Login di sim-mhs-api (port 4000)
+TOKEN=$(curl -s -X POST http://localhost:4000/api/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","password":"Admin123!"}' | jq -r .data.accessToken)
+
+# 2. Pakai token itu di sim-dosen-api
+curl -s http://localhost:3000/api/dosen -H "Authorization: Bearer $TOKEN"
+```
+
 ## Konfigurasi Environment
 
 Salin `.env.example` menjadi `.env`, lalu isi nilainya:
@@ -56,6 +91,7 @@ cp .env.example .env
 | --- | --- | --- |
 | `DATABASE_URL` | Ya | Koneksi aplikasi (boleh pooled / berakhiran `-pooler`) |
 | `DIRECT_URL` | Opsional | Koneksi langsung untuk migrasi Prisma. Bila kosong, `prisma7.config.ts` memakai `DATABASE_URL` |
+| `JWT_SECRET` | Ya | Secret JWT yang **sama** dengan `sim-mhs-api` untuk verifikasi token SSO |
 | `PORT` | Opsional | Port HTTP server (default `3000`) |
 | `NODE_ENV` | Opsional | `development` / `production` |
 | `CORS_ORIGIN` | Opsional | Origin yang diizinkan (default `*`) |
@@ -123,14 +159,14 @@ Server berjalan di `http://localhost:<PORT>/api` (default `http://localhost:3000
 
 | Method | Endpoint | Keterangan |
 | --- | --- | --- |
-| GET | `/api/health` | Health check + koneksi database |
-| GET | `/api/dosen` | Ambil semua data dosen |
-| GET | `/api/dosen/:id` | Ambil satu data dosen |
-| POST | `/api/dosen` | Tambah data dosen (hanya `nama` wajib) |
-| PUT | `/api/dosen/:id` | Perbarui data dosen (partial update) |
-| DELETE | `/api/dosen/:id` | Hapus data dosen |
+| GET | `/api/health` | Health check + koneksi database (**publik**, tanpa token) |
+| GET | `/api/dosen` | Ambil semua data dosen (perlu token SSO) |
+| GET | `/api/dosen/:id` | Ambil satu data dosen (perlu token SSO) |
+| POST | `/api/dosen` | Tambah data dosen — `ADMIN`, `BAAK` (hanya `nama` wajib) |
+| PUT | `/api/dosen/:id` | Perbarui data dosen — `ADMIN`, `BAAK` (partial update) |
+| DELETE | `/api/dosen/:id` | Hapus data dosen — `ADMIN`, `BAAK` |
 
-Kode status yang dipakai: `200` OK, `201` Created, `400` validasi gagal / id tidak valid / JSON rusak, `404` tidak ditemukan, `409` duplikat (`nomor_registrasi` unik), `413` payload terlalu besar, `500` kesalahan server (pesan generik).
+Kode status yang dipakai: `200` OK, `201` Created, `400` validasi gagal / id tidak valid / JSON rusak, `401` token SSO tidak ada/kedaluwarsa, `403` role tidak diizinkan, `404` tidak ditemukan, `409` duplikat (`nomor_registrasi` unik), `413` payload terlalu besar, `500` kesalahan server (pesan generik).
 
 Format sukses:
 
@@ -151,30 +187,39 @@ Field yang tersedia pada resource dosen: `nomor_registrasi`, `nuptk`, `nama`, `n
 ```bash
 BASE=http://localhost:3000/api
 
-# Health check
+# Semua endpoint di bawah (kecuali /health) perlu token SSO dari sim-mhs-api:
+# TOKEN=$(curl -s -X POST http://localhost:4000/api/auth/login \
+#   -H 'Content-Type: application/json' \
+#   -d '{"username":"admin","password":"Admin123!"}' | jq -r .data.accessToken)
+
+# Health check (publik)
 curl -s $BASE/health
 
-# Ambil semua data
-curl -s $BASE/dosen
+# Ambil semua data (perlu token)
+curl -s $BASE/dosen -H "Authorization: Bearer $TOKEN"
 
 # Ambil satu data (id dikirim sebagai string karena BigInt)
-curl -s $BASE/dosen/1
+curl -s $BASE/dosen/1 -H "Authorization: Bearer $TOKEN"
 
-# Tambah data
+# Tambah data (ADMIN/BAAK)
 curl -s -X POST $BASE/dosen \
+  -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"nama":"Dr. Contoh, M.T.","nomor_registrasi":"REG-2026-0099","penempatan":"Fakultas Teknik"}'
 
 # Perbarui data (partial)
 curl -s -X PUT $BASE/dosen/1 \
+  -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"jabatan_fungsional":"Lektor Kepala","status_aktivitas":"Aktif"}'
 
 # Hapus data
-curl -s -X DELETE $BASE/dosen/1
+curl -s -X DELETE $BASE/dosen/1 -H "Authorization: Bearer $TOKEN"
 
-# Kasus gagal (validasi)
-curl -s -X POST $BASE/dosen -H 'Content-Type: application/json' -d '{"nomor_registrasi":"X"}'
+# Kasus gagal: tanpa token (401) dan validasi (400)
+curl -s $BASE/dosen
+curl -s -X POST $BASE/dosen -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"nomor_registrasi":"X"}'
 ```
 
 ## Struktur Proyek
@@ -190,8 +235,10 @@ curl -s -X POST $BASE/dosen -H 'Content-Type: application/json' -d '{"nomor_regi
 │   ├── app.js               # Konfigurasi Express (cors, json, routes)
 │   ├── server.js            # Entry point + graceful shutdown
 │   ├── config/database.js   # PrismaClient + driver adapter @prisma/adapter-pg
+│   ├── config/jwt.js        # Verifikasi token SSO (shared secret sim-mhs-api)
 │   ├── controllers/dosen.controller.js
 │   ├── middleware/
+│   │   ├── auth.js          # authenticate (JWT SSO) + authorize (peran)
 │   │   ├── error-handler.js # Error global tanpa bocoran detail DB
 │   │   └── not-found.js
 │   ├── routes/
