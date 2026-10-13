@@ -1,0 +1,41 @@
+// Skema Prisma ORM v7 untuk tabel `dosen`.
+// Kolom dan tipe data disamakan dengan berkas `sim_dosen.sql`.
+
+// Catatan: generator `prisma-client` (baru) Prisma v7 menghasilkan berkas
+// TypeScript bahkan dengan ekstensi .js, sehingga tidak bisa dijalankan Node
+// ESM murni. Karena proyek ini memakai JavaScript ES Modules, kita pakai
+// generator `prisma-client-js` yang menghasilkan JS murni + driver adapter.
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Koneksi untuk CLI migrasi dibaca dari prisma7.config.ts (DIRECT_URL / DATABASE_URL)
+}
+
+model Dosen {
+  id                  BigInt    @id @default(autoincrement())
+
+  nomor_registrasi    String?   @unique @db.VarChar(50)
+  nuptk               String?   @db.VarChar(30)
+  nama                String    @db.VarChar(150)
+  nip                 String?   @db.VarChar(30)
+
+  jabatan_fungsional  String?   @db.VarChar(100)
+  kepangkatan         String?   @db.VarChar(100)
+  pendidikan_terakhir String?   @db.VarChar(100)
+  rumpun_ilmu         String?   @db.VarChar(150)
+
+  status_serdos       String?   @db.VarChar(50)
+  status_pegawai      String?   @db.VarChar(50)
+  ikatan_kerja        String?   @db.VarChar(100)
+  status_aktivitas    String?   @db.VarChar(50)
+  penempatan          String?   @db.VarChar(150)
+
+  created_at          DateTime? @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime? @default(now()) @updatedAt @db.Timestamptz(6)
+
+  @@map("dosen")
+}
